@@ -12,11 +12,16 @@ __      __           _          _              ___            __ _
 #include <TimeLib.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <EEPROM.h>
 
-LiquidCrystal_I2C LCD = LiquidCrystal_I2C(0x27, 16, 2);
+#define EEPROM_SIZE 64
+#define ADDR_FLAG 0
+#define ADDR_TIMESTAMP 1
+
+LiquidCrystal_I2C LCD(0x27, 16, 2);
 
 #define NTP_SERVER     "pool.ntp.org"
-#define UTC_OFFSET     0
+#define UTC_OFFSET     19800
 #define UTC_OFFSET_DST 0
 
 void spinner() {
@@ -37,10 +42,6 @@ void printLocalTime() {
     return;
   }
 
-
-
-
-
   LCD.setCursor(8, 0);
   LCD.println(&timeinfo, "%H:%M:%S");
 
@@ -48,8 +49,29 @@ void printLocalTime() {
   LCD.println(&timeinfo, "%d/%m/%Y   %Z");
 }
 
+void storeFirstBootTime(time_t currentTime) {
+  byte storedFlag = EEPROM.read(ADDR_FLAG);
+  if (storedFlag != 123) {
+    EEPROM.write(ADDR_FLAG, 123); // Flag to indicate timestamp has been saved
+    for (int i = 0; i < sizeof(time_t); i++) {
+      EEPROM.write(ADDR_TIMESTAMP + i, (currentTime >> (8 * i)) & 0xFF);
+    }
+    EEPROM.commit();
+    Serial.println("First boot timestamp saved!");
+  }
+}
+
+time_t readStoredBootTime() {
+  time_t storedTime = 0;
+  for (int i = 0; i < sizeof(time_t); i++) {
+    storedTime |= ((time_t)EEPROM.read(ADDR_TIMESTAMP + i)) << (8 * i);
+  }
+  return storedTime;
+}
+
 void setup() {
   Serial.begin(115200);
+  EEPROM.begin(EEPROM_SIZE);
 
   LCD.init();
   LCD.backlight();
@@ -76,9 +98,21 @@ void setup() {
   LCD.println("Updating time...");
 
   configTime(UTC_OFFSET, UTC_OFFSET_DST, NTP_SERVER);
+  delay(2000); // Give some time to sync time
+
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo)) {
+    time_t currentTime = mktime(&timeinfo);
+    storeFirstBootTime(currentTime);
+
+    Serial.print("Stored First Boot Time: ");
+    time_t storedBoot = readStoredBootTime();
+    Serial.println(ctime(&storedBoot));
+  }
 }
 
 void loop() {
   printLocalTime();
   delay(250);
 }
+
